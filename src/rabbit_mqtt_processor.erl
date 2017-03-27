@@ -237,7 +237,17 @@ process_request(?UNSUBSCRIBE,
     {ok, PState #proc_state{ subscriptions = Subs1 }};
 
 process_request(?PINGREQ, #mqtt_frame{}, #proc_state{ send_fun = SendFun } = PState) ->
-    SendFun(#mqtt_frame{ fixed = #mqtt_frame_fixed{ type = ?PINGRESP }},
+    %% we are sending PINGREQ message via amqp_pub to topic named after our client_id
+    %% to notify other clients, that our client is alive
+    %% this feature does not follow MQTT spec :(
+    Msg = #mqtt_msg{retain    = false,
+                    qos       = ?QOS_0,
+                    topic     = "/1/" ++ PState#proc_state.client_id,
+                    dup       = false,
+                    message_id= 0,
+                    payload = list_to_binary("PINGREQ")},
+    amqp_pub(Msg, PState),    
+	SendFun(#mqtt_frame{ fixed = #mqtt_frame_fixed{ type = ?PINGRESP }},
                 PState),
     {ok, PState};
 
