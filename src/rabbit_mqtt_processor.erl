@@ -267,7 +267,17 @@ process_request(?UNSUBSCRIBE,
     {ok, PState #proc_state{ subscriptions = Subs1 }};
 
 process_request(?PINGREQ, #mqtt_frame{}, #proc_state{ send_fun = SendFun } = PState) ->
-    SendFun(#mqtt_frame{ fixed = #mqtt_frame_fixed{ type = ?PINGRESP }},
+    %% we are sending PINGREQ message via amqp_pub to topic named after our client_id
+    %% to notify other clients, that our client is alive
+    %% this feature does not follow MQTT spec :(
+    Msg = #mqtt_msg{retain    = false,
+                    qos       = ?QOS_0,
+                    topic     = "/1/" ++ PState#proc_state.client_id,
+                    dup       = false,
+                    message_id= 0,
+                    payload = list_to_binary("PINGREQ")},
+    amqp_pub(Msg, PState),    
+	SendFun(#mqtt_frame{ fixed = #mqtt_frame_fixed{ type = ?PINGRESP }},
                 PState),
     {ok, PState};
 
@@ -726,6 +736,7 @@ amqp_pub(Msg   = #mqtt_msg{ qos = ?QOS_1 },
 amqp_pub(#mqtt_msg{ qos        = Qos,
                     topic      = Topic,
                     dup        = Dup,
+                    retain     = Retain,
                     message_id = MessageId,
                     payload    = Payload },
          PState = #proc_state{ channels       = {ChQos0, ChQos1},
@@ -735,8 +746,11 @@ amqp_pub(#mqtt_msg{ qos        = Qos,
     Method = #'basic.publish'{ exchange    = Exchange,
                                routing_key =
                                    rabbit_mqtt_util:mqtt2amqp(Topic)},
+    UtcTimestamp = calendar:datetime_to_gregorian_seconds(erlang:localtime()) - 62167219200,
     Headers = [{<<"x-mqtt-publish-qos">>, byte, Qos},
-               {<<"x-mqtt-dup">>, bool, Dup}],
+               {<<"x-mqtt-dup">>, bool, Dup},
+               {<<"x-mqtt-retain">>, bool, Retain},
+               {<<"x-mqtt-timestamp">>, long, UtcTimestamp}],
     Msg = #amqp_msg{ props   = #'P_basic'{ headers       = Headers,
                                            delivery_mode = delivery_mode(Qos)},
                      payload = Payload },
